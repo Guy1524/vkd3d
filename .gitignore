@@ -23,3 +23,7 @@ vkd3d-*.tar.xz
 .deps
 .dirstamp
 .libs
+
+.vscode/**
+compile_commands.json
+
