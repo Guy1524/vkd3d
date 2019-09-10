@@ -45,9 +45,12 @@ HRESULT vkd3d_queue_create(struct d3d12_device *device,
     object->vk_queue_flags = properties->queueFlags;
     object->timestamp_bits = properties->timestampValidBits;
 
-    object->semaphores = NULL;
-    object->semaphores_size = 0;
+    object->semaphores.vk_semaphores = NULL;
+    object->semaphores.sequence_numbers = NULL;
+    object->vk_semaphores_size = 0;
+    object->seq_numbers_size = 0;
     object->semaphore_count = 0;
+    object->pending_semaphore_index = -1;
 
     memset(object->old_vk_semaphores, 0, sizeof(object->old_vk_semaphores));
 
@@ -70,9 +73,10 @@ void vkd3d_queue_destroy(struct vkd3d_queue *queue, struct d3d12_device *device)
         ERR("Failed to lock mutex, error %d.\n", rc);
 
     for (i = 0; i < queue->semaphore_count; ++i)
-        VK_CALL(vkDestroySemaphore(device->vk_device, queue->semaphores[i].vk_semaphore, NULL));
+        VK_CALL(vkDestroySemaphore(device->vk_device, queue->semaphores.vk_semaphores[i], NULL));
 
-    vkd3d_free(queue->semaphores);
+    vkd3d_free(queue->semaphores.vk_semaphores);
+    vkd3d_free(queue->semaphores.sequence_numbers);
 
     for (i = 0; i < ARRAY_SIZE(queue->old_vk_semaphores); ++i)
     {
@@ -157,10 +161,10 @@ static void vkd3d_queue_update_sequence_number(struct vkd3d_queue *queue,
 
     for (i = 0; i < queue->semaphore_count; ++i)
     {
-        if (queue->semaphores[i].sequence_number > queue->completed_sequence_number)
+        if (queue->semaphores.sequence_numbers[i] > queue->completed_sequence_number)
             break;
 
-        vk_semaphore = queue->semaphores[i].vk_semaphore;
+        vk_semaphore = queue->semaphores.vk_semaphores[i];
 
         /* Try to store the Vulkan semaphore for reuse. */
         for (j = 0; j < ARRAY_SIZE(queue->old_vk_semaphores); ++j)
@@ -182,7 +186,8 @@ static void vkd3d_queue_update_sequence_number(struct vkd3d_queue *queue,
     if (i > 0)
     {
         queue->semaphore_count -= i;
-        memmove(queue->semaphores, &queue->semaphores[i], queue->semaphore_count * sizeof(*queue->semaphores));
+        memmove(queue->semaphores.vk_semaphores, &queue->semaphores.vk_semaphores[i], queue->semaphore_count * sizeof(*queue->semaphores.vk_semaphores));
+        memmove(queue->semaphores.sequence_numbers, &queue->semaphores.sequence_numbers[i], queue->semaphore_count * sizeof(*queue->semaphores.sequence_numbers));
     }
 
     if (destroyed_semaphore_count)
@@ -201,7 +206,7 @@ static uint64_t vkd3d_queue_reset_sequence_number_locked(struct vkd3d_queue *que
     queue->submitted_sequence_number = 1;
 
     for (i = 0; i < queue->semaphore_count; ++i)
-        queue->semaphores[i].sequence_number = queue->submitted_sequence_number;
+        queue->semaphores.sequence_numbers[i] = queue->submitted_sequence_number;
 
     return queue->submitted_sequence_number;
 }
@@ -5511,6 +5516,7 @@ static void STDMETHODCALLTYPE d3d12_command_queue_CopyTileMappings(ID3D12Command
 static void STDMETHODCALLTYPE d3d12_command_queue_ExecuteCommandLists(ID3D12CommandQueue *iface,
         UINT command_list_count, ID3D12CommandList * const *command_lists)
 {
+    static const VkPipelineStageFlagBits wait_stage_mask = VK_PIPELINE_STAGE_ALL_COMMANDS_BIT;
     struct d3d12_command_queue *command_queue = impl_from_ID3D12CommandQueue(iface);
     const struct vkd3d_vk_device_procs *vk_procs;
     struct d3d12_command_list *cmd_list;
@@ -5556,6 +5562,15 @@ static void STDMETHODCALLTYPE d3d12_command_queue_ExecuteCommandLists(ID3D12Comm
     submit_desc.signalSemaphoreCount = 0;
     submit_desc.pSignalSemaphores = NULL;
 
+    if (command_queue->vkd3d_queue->pending_semaphore_index != -1)
+    {
+        submit_desc.waitSemaphoreCount = command_queue->vkd3d_queue->semaphore_count - command_queue->vkd3d_queue->pending_semaphore_index;
+        submit_desc.pWaitSemaphores = &command_queue->vkd3d_queue->semaphores.vk_semaphores[command_queue->vkd3d_queue->pending_semaphore_index];
+        submit_desc.pWaitDstStageMask = &wait_stage_mask;
+
+        command_queue->vkd3d_queue->pending_semaphore_index = -1;
+    }
+
     if (!(vk_queue = vkd3d_queue_acquire(command_queue->vkd3d_queue)))
     {
         ERR("Failed to acquire queue %p.\n", command_queue->vkd3d_queue);
@@ -5593,6 +5608,7 @@ static void STDMETHODCALLTYPE d3d12_command_queue_EndEvent(ID3D12CommandQueue *i
 static HRESULT STDMETHODCALLTYPE d3d12_command_queue_Signal(ID3D12CommandQueue *iface,
         ID3D12Fence *fence_iface, UINT64 value)
 {
+    static const VkPipelineStageFlagBits wait_stage_mask = VK_PIPELINE_STAGE_ALL_COMMANDS_BIT;
     struct d3d12_command_queue *command_queue = impl_from_ID3D12CommandQueue(iface);
     const struct vkd3d_vk_device_procs *vk_procs;
     VkSemaphore vk_semaphore = VK_NULL_HANDLE;
@@ -5642,6 +5658,15 @@ static HRESULT STDMETHODCALLTYPE d3d12_command_queue_Signal(ID3D12CommandQueue *
     submit_info.pCommandBuffers = NULL;
     submit_info.signalSemaphoreCount = vk_semaphore ? 1 : 0;
     submit_info.pSignalSemaphores = &vk_semaphore;
+
+    if (command_queue->vkd3d_queue->pending_semaphore_index != -1)
+    {
+        submit_info.waitSemaphoreCount = command_queue->vkd3d_queue->semaphore_count - command_queue->vkd3d_queue->pending_semaphore_index;
+        submit_info.pWaitSemaphores = &command_queue->vkd3d_queue->semaphores.vk_semaphores[command_queue->vkd3d_queue->pending_semaphore_index];
+        submit_info.pWaitDstStageMask = &wait_stage_mask;
+
+        command_queue->vkd3d_queue->pending_semaphore_index = -1;
+    }
 
     if ((vr = VK_CALL(vkQueueSubmit(vk_queue, 1, &submit_info, vk_fence))) >= 0)
     {
@@ -5702,21 +5727,16 @@ fail:
 static HRESULT STDMETHODCALLTYPE d3d12_command_queue_Wait(ID3D12CommandQueue *iface,
         ID3D12Fence *fence_iface, UINT64 value)
 {
-    static const VkPipelineStageFlagBits wait_stage_mask = VK_PIPELINE_STAGE_ALL_COMMANDS_BIT;
     struct d3d12_command_queue *command_queue = impl_from_ID3D12CommandQueue(iface);
-    const struct vkd3d_vk_device_procs *vk_procs;
     struct vkd3d_signaled_semaphore *semaphore;
     uint64_t completed_value = 0;
     struct vkd3d_queue *queue;
     struct d3d12_fence *fence;
-    VkSubmitInfo submit_info;
     VkQueue vk_queue;
-    VkResult vr;
     HRESULT hr;
 
     TRACE("iface %p, fence %p, value %#"PRIx64".\n", iface, fence_iface, value);
 
-    vk_procs = &command_queue->device->vk_procs;
     queue = command_queue->vkd3d_queue;
 
     fence = unsafe_impl_from_ID3D12Fence(fence_iface);
@@ -5752,18 +5772,10 @@ static HRESULT STDMETHODCALLTYPE d3d12_command_queue_Wait(ID3D12CommandQueue *if
         return S_OK;
     }
 
-    submit_info.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
-    submit_info.pNext = NULL;
-    submit_info.waitSemaphoreCount = 1;
-    submit_info.pWaitSemaphores = &semaphore->vk_semaphore;
-    submit_info.pWaitDstStageMask = &wait_stage_mask;
-    submit_info.commandBufferCount = 0;
-    submit_info.pCommandBuffers = NULL;
-    submit_info.signalSemaphoreCount = 0;
-    submit_info.pSignalSemaphores = NULL;
-
-    if (!vkd3d_array_reserve((void **)&queue->semaphores, &queue->semaphores_size,
-            queue->semaphore_count + 1, sizeof(*queue->semaphores)))
+    if (!vkd3d_array_reserve((void **)&queue->semaphores.vk_semaphores, &queue->vk_semaphores_size,
+            queue->semaphore_count + 1, sizeof(*queue->semaphores.vk_semaphores))
+     || !vkd3d_array_reserve((void **)&queue->semaphores.sequence_numbers, &queue->seq_numbers_size,
+            queue->semaphore_count + 1, sizeof(*queue->semaphores.sequence_numbers)))
     {
         ERR("Failed to allocate memory for semaphore.\n");
         vkd3d_queue_release(queue);
@@ -5771,24 +5783,17 @@ static HRESULT STDMETHODCALLTYPE d3d12_command_queue_Wait(ID3D12CommandQueue *if
         goto fail;
     }
 
-    if ((vr = VK_CALL(vkQueueSubmit(vk_queue, 1, &submit_info, VK_NULL_HANDLE))) >= 0)
-    {
-        queue->semaphores[queue->semaphore_count].vk_semaphore = semaphore->vk_semaphore;
-        queue->semaphores[queue->semaphore_count].sequence_number = queue->submitted_sequence_number + 1;
-        ++queue->semaphore_count;
+    queue->semaphores.vk_semaphores[queue->semaphore_count] = semaphore->vk_semaphore;
+    queue->semaphores.sequence_numbers[queue->semaphore_count] = queue->submitted_sequence_number + 1;
 
-        command_queue->last_waited_fence = fence;
-        command_queue->last_waited_fence_value = value;
-    }
+    if (queue->pending_semaphore_index == -1) queue->pending_semaphore_index = queue->semaphore_count;
+
+    ++queue->semaphore_count;
+
+    command_queue->last_waited_fence = fence;
+    command_queue->last_waited_fence_value = value;
 
     vkd3d_queue_release(queue);
-
-    if (vr < 0)
-    {
-        WARN("Failed to submit wait operation, vr %d.\n", vr);
-        hr = hresult_from_vk_result(vr);
-        goto fail;
-    }
 
     d3d12_fence_remove_vk_semaphore(fence, semaphore);
     return S_OK;

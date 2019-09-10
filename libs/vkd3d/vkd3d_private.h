@@ -954,11 +954,13 @@ struct vkd3d_queue
 
     struct
     {
-        VkSemaphore vk_semaphore;
-        uint64_t sequence_number;
-    } *semaphores;
-    size_t semaphores_size;
+        VkSemaphore *vk_semaphores;
+        uint64_t *sequence_numbers;
+    } semaphores;
+    size_t vk_semaphores_size;
+    size_t seq_numbers_size;
     size_t semaphore_count;
+    uint64_t pending_semaphore_index;
 
     VkSemaphore old_vk_semaphores[VKD3D_MAX_VK_SYNC_OBJECTS];
 };
