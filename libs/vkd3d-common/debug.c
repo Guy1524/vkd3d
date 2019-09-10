@@ -28,6 +28,12 @@
 #include <stdbool.h>
 #include <string.h>
 
+#include <sys/types.h>
+#include <pthread.h>
+#include <sys/types.h>
+#include <unistd.h>
+#include <sys/syscall.h>
+
 #define VKD3D_DEBUG_BUFFER_COUNT 64
 #define VKD3D_DEBUG_BUFFER_SIZE 512
 
@@ -77,7 +83,7 @@ void vkd3d_dbg_printf(enum vkd3d_dbg_level level, const char *function, const ch
 
     assert(level < ARRAY_SIZE(debug_level_names));
 
-    fprintf(stderr, "%s:%s: ", debug_level_names[level], function);
+    fprintf(stderr, "%ld:%s:%s: ", syscall(SYS_gettid), debug_level_names[level], function);
     va_start(args, fmt);
     vfprintf(stderr, fmt, args);
     va_end(args);
