@@ -451,6 +451,9 @@ HRESULT vkd3d_get_image_allocation_info(struct d3d12_device *device,
 struct vkd3d_view
 {
     LONG refcount;
+    pthread_spinlock_t lock;
+    uint32_t type;
+    VkDescriptorType vk_descriptor_type;
     union
     {
         VkBufferView vk_buffer_view;
@@ -460,7 +463,7 @@ struct vkd3d_view
     VkBufferView vk_counter_view;
 };
 
-void vkd3d_view_decref(struct vkd3d_view *view, struct d3d12_device *device) DECLSPEC_HIDDEN;
+int vkd3d_view_decref(struct vkd3d_view *view, struct d3d12_device *device) DECLSPEC_HIDDEN;
 void vkd3d_view_incref(struct vkd3d_view *view) DECLSPEC_HIDDEN;
 
 struct d3d12_desc
