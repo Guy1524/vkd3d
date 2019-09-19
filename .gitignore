@@ -23,3 +23,8 @@ vkd3d-*.tar.xz
 .deps
 .dirstamp
 .libs
+
+.vscode
+build
+build.w64
+compile_commands.json
