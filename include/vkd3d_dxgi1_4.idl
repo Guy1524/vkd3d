@@ -45,3 +45,51 @@ interface IDXGIFactory4 : IDXGIFactory3
     HRESULT EnumAdapterByLuid(LUID luid, REFIID iid, void **adapter);
     HRESULT EnumWarpAdapter(REFIID iid, void **adapter);
 }
+
+typedef enum DXGI_MEMORY_SEGMENT_GROUP
+{
+    DXGI_MEMORY_SEGMENT_GROUP_LOCAL = 0x0,
+    DXGI_MEMORY_SEGMENT_GROUP_NON_LOCAL = 0x1,
+} DXGI_MEMORY_SEGMENT_GROUP;
+
+typedef struct DXGI_QUERY_VIDEO_MEMORY_INFO
+{
+    UINT64 Budget;
+    UINT64 CurrentUsage;
+    UINT64 AvailableForReservation;
+    UINT64 CurrentReservation;
+} DXGI_QUERY_VIDEO_MEMORY_INFO;
+
+[
+    object,
+    uuid(645967a4-1392-4310-a798-8053ce3e93fd),
+    local,
+    pointer_default(unique)
+]
+interface IDXGIAdapter3 : IDXGIAdapter2
+{
+    HRESULT RegisterHardwareContentProtectionTeardownStatusEvent(
+        [in] HANDLE event,
+        [out] DWORD *cookie
+    );
+    void UnregisterHardwareContentProtectionTeardownStatus(
+        [in] DWORD cookie
+    );
+    HRESULT QueryVideoMemoryInfo(
+        [in] UINT node_index,
+        [in] DXGI_MEMORY_SEGMENT_GROUP segment_group,
+        [out] DXGI_QUERY_VIDEO_MEMORY_INFO *memory_info
+    );
+    HRESULT SetVideoMemoryReservation(
+        [in] UINT node_index,
+        [in] DXGI_MEMORY_SEGMENT_GROUP segment_group,
+        [in] UINT64 reservation
+    );
+    HRESULT RegisterVideoMemoryBudgetChangeNotificationEvent(
+        [in] HANDLE event,
+        [out] DWORD *cookie
+    );
+    void UnregisterVideoMemoryBudgetChangeNotification(
+        [in] DWORD cookie
+    );
+}

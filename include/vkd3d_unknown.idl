@@ -19,6 +19,8 @@
 cpp_quote("#ifndef __VKD3D_UNKNOWN_H")
 cpp_quote("#define __VKD3D_UNKNOWN_H")
 
+import "vkd3d_windows.h";
+
 /* For IDL only. */
 cpp_quote("#if 0")
 typedef IID *REFIID;

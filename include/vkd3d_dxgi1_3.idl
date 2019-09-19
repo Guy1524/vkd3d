@@ -48,3 +48,5 @@ interface IDXGIFactory3 : IDXGIFactory2
 {
     UINT GetCreationFlags();
 }
+
+[local] HRESULT __stdcall CreateDXGIFactory2(UINT flags, REFIID iid, void **factory);

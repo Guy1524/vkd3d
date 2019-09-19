@@ -245,6 +245,12 @@ typedef struct SECURITY_ATTRIBUTES SECURITY_ATTRIBUTES;
 # endif
 #endif  /* DECLSPEC_HIDDEN */
 
+#ifndef DLLEXPORT
+#  ifdef __MINGW32__
+#    define DLLEXPORT __declspec(dllexport)
+#  endif
+#endif
+
 /* Define min() & max() macros */
 #ifndef NOMINMAX
 # ifndef min

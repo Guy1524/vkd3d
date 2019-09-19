@@ -67,8 +67,14 @@ const char *debugstr_w(const WCHAR *wstr, size_t wchar_size) DECLSPEC_HIDDEN;
         vkd3d_dbg_next_time = true; \
         VKD3D_DBG_PRINTF
 
+#ifndef __MINGW32__
 #define VKD3D_DBG_PRINTF(args...) \
         vkd3d_dbg_printf(vkd3d_dbg_level, __FUNCTION__, args); } while (0)
+#else
+/* format specifiers are broken on mingw */
+#define VKD3D_DBG_PRINTF(args...) \
+        if (vkd3d_dbg_level) break; } while(0)
+#endif
 
 #ifndef TRACE
 #define TRACE VKD3D_DBG_LOG(TRACE)
