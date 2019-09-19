@@ -18,7 +18,7 @@
 
 #include "vkd3d_private.h"
 
-#ifdef HAVE_DLFCN_H
+#if defined(HAVE_DLFCN_H) && !defined(_WIN32)
 #include <dlfcn.h>
 
 static void *vkd3d_dlopen(const char *name)
