@@ -4,16 +4,19 @@
 /* copy of wine's d3d12_main.c w/ minor tweaks */
 #include <stdlib.h>
 
-#include <vkd3d_common.h>
-#include <vkd3d_memory.h>
+#include "vkd3d_common.h"
+#include "vkd3d_memory.h"
 
 #include <initguid.h>
 
 #define VK_USE_PLATFORM_WIN32_KHR
 #include <vulkan/vulkan.h>
+
+#include <d3d12.h>
+#define VKD3D_NO_WIN32_TYPES
 #include <vkd3d.h>
 
-#include <vkd3d_wine_dxgi.h>
+#include "vkd3d_wine_dxgi.h"
 
 static HMODULE vulkan_module;
 
@@ -69,7 +72,7 @@ static DWORD WINAPI d3d12_thread_main(void *data)
     struct d3d12_thread_data *thread_data = data;
 
     thread_data->main_pfn(thread_data->data);
-    free(thread_data);
+    vkd3d_free(thread_data);
     return 0;
 }
 
@@ -78,7 +81,7 @@ static void *d3d12_create_thread(PFN_vkd3d_thread main_pfn, void *data)
     struct d3d12_thread_data *thread_data;
     HANDLE thread;
 
-    if (!(thread_data = malloc(sizeof(*thread_data))))
+    if (!(thread_data = vkd3d_malloc(sizeof(*thread_data))))
     {
         ERR("Failed to allocate thread data.\n");
         return NULL;
@@ -88,7 +91,7 @@ static void *d3d12_create_thread(PFN_vkd3d_thread main_pfn, void *data)
     thread_data->data = data;
 
     if (!(thread = CreateThread(NULL, 0, d3d12_thread_main, thread_data, 0, NULL)))
-        free(thread_data);
+        vkd3d_free(thread_data);
 
     return thread;
 }
@@ -154,7 +157,7 @@ static BOOL check_vk_instance_extension(VkInstance vk_instance,
     if (pfn_vkEnumerateInstanceExtensionProperties(NULL, &count, NULL) < 0)
         return FALSE;
 
-    if (!(properties = calloc(count, sizeof(*properties))))
+    if (!(properties = vkd3d_calloc(count, sizeof(*properties))))
         return FALSE;
 
     if (pfn_vkEnumerateInstanceExtensionProperties(NULL, &count, properties) >= 0)
@@ -169,7 +172,7 @@ static BOOL check_vk_instance_extension(VkInstance vk_instance,
         }
     }
 
-    free(properties);
+    vkd3d_free(properties);
     return ret;
 }
 
@@ -208,7 +211,7 @@ static VkPhysicalDevice d3d12_get_vk_physical_device(struct vkd3d_instance *inst
         return VK_NULL_HANDLE;
     }
 
-    if (!(vk_physical_devices = calloc(count, sizeof(*vk_physical_devices))))
+    if (!(vk_physical_devices = vkd3d_calloc(count, sizeof(*vk_physical_devices))))
         return VK_NULL_HANDLE;
 
     if ((vr = pfn_vkEnumeratePhysicalDevices(vk_instance, &count, vk_physical_devices)) < 0)
@@ -257,7 +260,7 @@ static VkPhysicalDevice d3d12_get_vk_physical_device(struct vkd3d_instance *inst
         FIXME("Could not find Vulkan physical device for DXGI adapter.\n");
 
 done:
-    free(vk_physical_devices);
+    vkd3d_free(vk_physical_devices);
     return vk_physical_device;
 }
 
